@@ -5,39 +5,46 @@
   let userInteracted = false;
 
   const setAudio = (v) => {
-    try { v.defaultMuted = false; v.muted = false; v.volume = 1; } catch (_) {}
+    try {
+      v.defaultMuted = false;
+      v.muted = false;
+      v.volume = 1;
+    } catch (_) {}
   };
 
   const pauseOthers = (current) => {
     videos.forEach(v => { if (v !== current) v.pause(); });
   };
 
-  const play = (v, withAudio = true) => {
+  const play = (v) => {
     if (!v) return;
     pauseOthers(v);
-    if (withAudio || userInteracted) setAudio(v);
+    setAudio(v);
     const p = v.play();
     if (p && p.catch) p.catch(() => {
       // Browsers may block autoplay with sound until the visitor interacts.
-      try { v.muted = true; v.play().catch(() => {}); } catch (_) {}
+      // We do not permanently mute the preview; normal user-initiated playback stays at 100% volume.
+      try { if (!userInteracted) { v.muted = true; v.play().catch(() => {}); } } catch (_) {}
     });
   };
 
   videos.forEach(v => {
+    setAudio(v);
+
     v.addEventListener('play', () => {
       pauseOthers(v);
       if (v !== hero && hero) hero.pause();
-      if (userInteracted) setAudio(v);
+      setAudio(v);
     });
 
     v.addEventListener('pointerup', () => {
       userInteracted = true;
-      if (v.paused) play(v, true);
+      if (v.paused) play(v);
       else setAudio(v);
     });
 
     v.addEventListener('mouseenter', () => {
-      if (window.matchMedia('(pointer:fine)').matches) play(v, true);
+      if (window.matchMedia('(pointer:fine)').matches) play(v);
     });
   });
 
@@ -49,7 +56,7 @@
           if (!best || entry.intersectionRatio > best.intersectionRatio) best = entry;
         }
       });
-      if (best) play(best.target, true);
+      if (best) play(best.target);
     }, { threshold: [0.65] });
     videos.filter(v => v !== hero).forEach(v => observer.observe(v));
   }
@@ -60,7 +67,7 @@
       const first = document.querySelector('video[data-preview="01"]');
       const section = document.getElementById('previews');
       if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setTimeout(() => play(first, true), 450);
+      setTimeout(() => play(first), 450);
     });
   }
 
