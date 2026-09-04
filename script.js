@@ -5,11 +5,31 @@
   let userInteracted = false;
 
   const setAudio = (v) => {
+    if (!v) return;
     try {
+      v.removeAttribute('muted');
       v.defaultMuted = false;
       v.muted = false;
       v.volume = 1;
     } catch (_) {}
+  };
+
+  const fixPreview04 = () => {
+    const v = document.querySelector('video[data-preview="04"]');
+    if (!v) return;
+    const source = v.querySelector('source');
+    if (source) {
+      const replacement = 'https://raw.githubusercontent.com/thearchofdawn/700-anime-edits-reels-bundle/main/preview/preview-05.mp4.mp4';
+      if (source.src !== replacement) {
+        source.src = replacement;
+        v.load();
+      }
+    }
+  };
+
+  const fixPreview01Label = () => {
+    const label = document.querySelector('video[data-preview="01"]')?.closest('.preview')?.querySelector('.caption');
+    if (label) label.textContent = 'PREVIEW 01.';
   };
 
   const pauseOthers = (current) => {
@@ -21,16 +41,21 @@
     pauseOthers(v);
     setAudio(v);
     const p = v.play();
-    if (p && p.catch) p.catch(() => {
-      // Browsers may block autoplay with sound until the visitor interacts.
-      // We do not permanently mute the preview; normal user-initiated playback stays at 100% volume.
-      try { if (!userInteracted) { v.muted = true; v.play().catch(() => {}); } } catch (_) {}
-    });
+    if (p && p.catch) {
+      p.catch(() => {
+        // Autoplay with sound can be blocked by the browser. Never mute as a workaround;
+        // once the visitor interacts, playback starts at full volume.
+      });
+    }
   };
+
+  fixPreview04();
+  fixPreview01Label();
 
   videos.forEach(v => {
     setAudio(v);
 
+    v.addEventListener('loadedmetadata', () => setAudio(v));
     v.addEventListener('play', () => {
       pauseOthers(v);
       if (v !== hero && hero) hero.pause();
