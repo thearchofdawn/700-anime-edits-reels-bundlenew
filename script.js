@@ -29,12 +29,21 @@
     }
   };
 
-  // Hard-set the requested Preview 04 source in JS as a second layer of protection.
+  // Ensure Preview 04 uses preview-08.
   const preview04 = document.querySelector('video[data-preview="04"] source');
   if (preview04) {
     const preview08Url = 'https://raw.githubusercontent.com/thearchofdawn/700-anime-edits-reels-bundle/main/preview/preview-08.mp4.mp4';
     if (preview04.src !== preview08Url) preview04.src = preview08Url;
     preview04.parentElement.load();
+  }
+
+  // Keep the page stat accurate: 6 real previews are currently shown in the main offer count.
+  const previewStat = [...document.querySelectorAll('.insideStat')].find((el) =>
+    el.querySelector('span')?.textContent.trim() === 'REAL PREVIEWS'
+  );
+  if (previewStat) {
+    const number = previewStat.querySelector('b');
+    if (number) number.textContent = '6';
   }
 
   videos.forEach((v) => {
