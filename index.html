@@ -47,10 +47,10 @@
   const targets = [document.getElementById('countdown'),document.getElementById('finalCountdown'),document.getElementById('stickyCountdown')];
   const pad = n => String(n).padStart(2,'0');
   function render(){const d=deadline-Date.now();if(d<=0){targets.forEach(el=>{if(el)el.textContent='THE DEADLINE HAS PASSED — PRICE IS NOW ₹299';});return;}const total=Math.floor(d/1000),days=Math.floor(total/86400),hours=Math.floor((total%86400)/3600),mins=Math.floor((total%3600)/60),secs=total%60;const text=`${days}d ${pad(hours)}h ${pad(mins)}m ${pad(secs)}s left`;targets.forEach(el=>{if(el)el.textContent=text;});}
-  render();setInterval(render,1000);document.querySelectorAll('.buy').forEach(a=>a.addEventListener('click',function(){if(window.fbq)fbq('track','InitiateCheckout',{value:199,currency:'INR'}));
+  render();setInterval(render,1000);document.querySelectorAll('.buy').forEach(a=>a.addEventListener('click',function(){if(window.fbq)fbq('track','InitiateCheckout',{value:199,currency:'INR'});}));
   const watch=document.getElementById('watch-previews');if(watch)watch.addEventListener('click',()=>document.getElementById('previews')?.scrollIntoView({behavior:'smooth'}));
 })();
 </script>
-<script src="script.js?v=20260907-previewfix3"></script>
+<script src="script.js?v=20260907-previewfix4"></script>
 </body>
 </html>
