@@ -4,14 +4,13 @@
   const videos = Array.from(document.querySelectorAll('video[data-preview]'));
   const watch = document.getElementById('watch-previews');
   let activeVideo = null;
-  let userGesture = false;
   let hoverVideo = null;
   let raf = 0;
+  let soundUnlocked = false;
 
-  // CORE AUTOPLAY SETUP: explicitly enable the browser's native autoplay flags.
-  // Audible autoplay is attempted when allowed; browsers that require a gesture
-  // will fall back to muted autoplay. A tap/click unlocks audio.
-  function enableNativeAutoplay(video) {
+  // Browser-safe autoplay: silent autoplay is allowed much more broadly.
+  // Audio is enabled after a real user interaction (tap/click/keyboard).
+  function prepare(video) {
     if (!video) return;
     video.autoplay = true;
     video.muted = true;
@@ -25,134 +24,150 @@
     video.setAttribute('preload', 'auto');
   }
 
-  videos.forEach(enableNativeAutoplay);
+  videos.forEach(prepare);
 
-  function stopOthers(current) {
+  function pauseAll(except) {
     videos.forEach((v) => {
-      if (v !== current) {
+      if (v !== except) {
         v.pause();
         v.classList.remove('is-autoplaying');
       }
     });
   }
 
-  function playPreview(video, audible = false) {
+  function start(video, allowSound = false) {
     if (!video) return;
-    enableNativeAutoplay(video);
-    stopOthers(video);
+    prepare(video);
+    pauseAll(video);
     activeVideo = video;
     video.classList.add('is-autoplaying');
 
-    const wantsAudio = audible || userGesture;
-    if (wantsAudio) {
-      video.muted = false;
-      video.defaultMuted = false;
+    const audible = allowSound || soundUnlocked;
+    video.muted = !audible;
+    video.defaultMuted = !audible;
+    if (audible) {
       video.removeAttribute('muted');
       video.volume = 1;
     } else {
-      video.muted = true;
-      video.defaultMuted = true;
       video.setAttribute('muted', '');
     }
 
-    const p = video.play();
-    if (p && p.catch) {
-      p.catch(() => {
-        // Browser rejected the audible request: force the standards-compliant
-        // silent autoplay path rather than leaving the preview stopped.
+    const attempt = video.play();
+    if (attempt && typeof attempt.catch === 'function') {
+      attempt.catch(() => {
+        // Guaranteed fallback path: restart muted when the browser blocks audio.
         video.muted = true;
         video.defaultMuted = true;
         video.setAttribute('muted', '');
         const retry = video.play();
-        if (retry && retry.catch) retry.catch(() => {});
+        if (retry && typeof retry.catch === 'function') retry.catch(() => {});
       });
     }
   }
 
-  function visibility(video) {
+  function visibleRatio(video) {
     const r = video.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return 0;
-    const vw = Math.max(0, Math.min(r.right, innerWidth) - Math.max(r.left, 0));
-    const vh = Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0));
-    return (vw * vh) / (r.width * r.height);
+    const left = Math.max(0, r.left);
+    const right = Math.min(innerWidth, r.right);
+    const top = Math.max(0, r.top);
+    const bottom = Math.min(innerHeight, r.bottom);
+    const w = Math.max(0, right - left);
+    const h = Math.max(0, bottom - top);
+    return (w * h) / (r.width * r.height);
   }
 
-  function selectPreview() {
+  // Play the one preview with the largest visible area once it reaches ~65%.
+  function chooseVisible() {
     if (document.hidden || hoverVideo) return;
+
     let best = null;
-    let bestVisibility = 0;
+    let bestRatio = 0;
 
     videos.forEach((video) => {
       if (getComputedStyle(video).display === 'none') return;
-      const ratio = visibility(video);
-      if (ratio > bestVisibility) {
-        bestVisibility = ratio;
+      const ratio = visibleRatio(video);
+      if (ratio > bestRatio) {
+        bestRatio = ratio;
         best = video;
       }
     });
 
-    // Requested behavior: use the preview that is approximately 65% visible.
-    // If several are visible, the most visible one wins. 35% is a safety floor
-    // so playback does not stop in the small gap between cards.
-    if (best && bestVisibility >= 0.65) {
-      if (activeVideo !== best || best.paused) playPreview(best);
-    } else if (best && bestVisibility >= 0.35) {
-      if (activeVideo !== best || best.paused) playPreview(best);
-    } else if (activeVideo) {
+    if (best && bestRatio >= 0.65) {
+      if (activeVideo !== best || best.paused) start(best);
+      return;
+    }
+
+    // Stop playback when no preview is near the requested visibility threshold.
+    if (activeVideo) {
       activeVideo.pause();
       activeVideo.classList.remove('is-autoplaying');
       activeVideo = null;
     }
   }
 
-  function queueSelect() {
+  function queueChoose() {
     if (raf) return;
     raf = requestAnimationFrame(() => {
       raf = 0;
-      selectPreview();
+      chooseVisible();
     });
   }
 
   videos.forEach((video) => {
-    // Retry as soon as each video has enough media buffered to start.
     ['loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough'].forEach((event) => {
       video.addEventListener(event, () => {
-        if (!document.hidden && !hoverVideo && visibility(video) >= 0.65) {
-          playPreview(video);
+        if (!document.hidden && !hoverVideo && visibleRatio(video) >= 0.65 && (activeVideo !== video || video.paused)) {
+          start(video);
         }
       });
     });
 
-    // Desktop: hover starts playback immediately.
+    // Desktop hover behavior.
     video.addEventListener('mouseenter', () => {
       hoverVideo = video;
-      playPreview(video);
+      start(video, soundUnlocked);
     });
 
     video.addEventListener('mouseleave', () => {
       if (hoverVideo === video) hoverVideo = null;
-      if (!hoverVideo) queueSelect();
+      queueChoose();
     });
 
-    // Direct touch/click is a genuine user gesture and can unlock audio.
+    // Touch/click unlocks sound for subsequent previews.
     video.addEventListener('pointerdown', () => {
-      userGesture = true;
+      soundUnlocked = true;
     }, { passive: true });
 
     video.addEventListener('click', () => {
-      userGesture = true;
-      playPreview(video, true);
+      soundUnlocked = true;
+      start(video, true);
     });
   });
 
-  // Scroll + resize: continuously choose the dominant preview by actual area.
-  window.addEventListener('scroll', queueSelect, { passive: true });
-  window.addEventListener('resize', queueSelect, { passive: true });
-  window.addEventListener('orientationchange', () => setTimeout(queueSelect, 100), { passive: true });
+  // Any user gesture on the page unlocks audio for subsequent autoplay previews.
+  const unlockAudio = () => {
+    soundUnlocked = true;
+    if (activeVideo) {
+      activeVideo.muted = false;
+      activeVideo.defaultMuted = false;
+      activeVideo.removeAttribute('muted');
+      activeVideo.volume = 1;
+      const p = activeVideo.play();
+      if (p && p.catch) p.catch(() => {});
+    }
+  };
+  ['pointerdown', 'touchstart', 'keydown'].forEach((event) => {
+    document.addEventListener(event, unlockAudio, { once: true, passive: event !== 'keydown' });
+  });
+
+  window.addEventListener('scroll', queueChoose, { passive: true });
+  window.addEventListener('resize', queueChoose, { passive: true });
+  window.addEventListener('orientationchange', () => setTimeout(queueChoose, 100), { passive: true });
 
   if ('IntersectionObserver' in window) {
-    const observer = new IntersectionObserver(() => queueSelect(), {
-      threshold: [0, 0.25, 0.35, 0.5, 0.65, 0.8, 1],
+    const observer = new IntersectionObserver(() => queueChoose(), {
+      threshold: [0, 0.25, 0.5, 0.65, 0.8, 1],
       rootMargin: '0px'
     });
     videos.forEach((video) => observer.observe(video));
@@ -161,35 +176,43 @@
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
       activeVideo = null;
-      setTimeout(queueSelect, 80);
+      setTimeout(queueChoose, 100);
     }
   });
-  window.addEventListener('pageshow', () => setTimeout(queueSelect, 100));
+
+  window.addEventListener('pageshow', () => setTimeout(queueChoose, 100));
   window.addEventListener('load', () => {
-    // Give CSS/layout and video sources time to settle before the first decision.
-    setTimeout(queueSelect, 50);
-    setTimeout(queueSelect, 300);
-    setTimeout(queueSelect, 1000);
+    // Try repeatedly because remote GitHub media can finish loading after layout.
+    setTimeout(queueChoose, 100);
+    setTimeout(queueChoose, 500);
+    setTimeout(queueChoose, 1500);
+    setTimeout(queueChoose, 3000);
   });
 
   if (watch) {
     watch.addEventListener('click', () => {
-      userGesture = true;
-      const section = document.getElementById('previews');
-      const first = document.querySelector('video[data-preview="01"]');
-      if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setTimeout(() => playPreview(first, true), 600);
+      soundUnlocked = true;
+      document.getElementById('previews')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setTimeout(() => {
+        const first = document.querySelector('video[data-preview="01"]');
+        if (first) start(first, true);
+      }, 700);
     });
   }
 
-  // Keep preview 04 mapped to preview 08 as in the existing page.
-  const preview04 = document.querySelector('video[data-preview="04"] source');
-  if (preview04) {
-    preview04.src = 'https://raw.githubusercontent.com/thearchofdawn/700-anime-edits-reels-bundle/main/preview/preview-08.mp4.mp4';
-    preview04.parentElement.load();
+  // Ensure preview 01 and 04 point at known-good raw files.
+  const source01 = document.querySelector('video[data-preview="01"] source');
+  if (source01) {
+    source01.src = 'https://raw.githubusercontent.com/thearchofdawn/700-anime-edits-reels-bundle/main/preview/preview-01.mp4.mp4';
+    source01.parentElement.load();
+  }
+  const source04 = document.querySelector('video[data-preview="04"] source');
+  if (source04) {
+    source04.src = 'https://raw.githubusercontent.com/thearchofdawn/700-anime-edits-reels-bundle/main/preview/preview-08.mp4.mp4';
+    source04.parentElement.load();
   }
 
-  // Countdown remains independent from video autoplay.
+  // Countdown.
   const countdown = document.getElementById('countdown');
   if (countdown) {
     const deadline = new Date('2026-09-08T18:00:00+05:30').getTime();
