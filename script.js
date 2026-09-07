@@ -188,7 +188,7 @@
 
   const countdown = document.getElementById('countdown');
   if (countdown) {
-    const deadline = new Date('2026-09-08T18:00:00+05:30').getTime();
+    const deadline = new Date('2026-09-08T19:30:00+05:30').getTime();
     const tick = () => {
       const diff = deadline - Date.now();
       if (diff <= 0) {
