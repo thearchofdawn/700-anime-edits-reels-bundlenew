@@ -3,100 +3,101 @@
 
   const videos = Array.from(document.querySelectorAll('video[data-preview]'));
   const watch = document.getElementById('watch-previews');
-  const previewSection = document.getElementById('previews');
   let activeVideo = null;
-  let userActivatedAudio = false;
+  let userGesture = false;
+  let hoverVideo = null;
+  let raf = 0;
 
-  const finePointer = () => window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-
-  function prep(video) {
+  // CORE AUTOPLAY SETUP: explicitly enable the browser's native autoplay flags.
+  // Audible autoplay is attempted when allowed; browsers that require a gesture
+  // will fall back to muted autoplay. A tap/click unlocks audio.
+  function enableNativeAutoplay(video) {
     if (!video) return;
+    video.autoplay = true;
+    video.muted = true;
+    video.defaultMuted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.setAttribute('autoplay', '');
+    video.setAttribute('muted', '');
     video.setAttribute('playsinline', '');
     video.setAttribute('webkit-playsinline', '');
-    video.preload = 'auto';
+    video.setAttribute('preload', 'auto');
   }
 
-  function pauseOthers(current) {
-    videos.forEach((video) => {
-      if (video !== current && !video.paused) {
-        video.pause();
-        video.classList.remove('is-autoplaying');
+  videos.forEach(enableNativeAutoplay);
+
+  function stopOthers(current) {
+    videos.forEach((v) => {
+      if (v !== current) {
+        v.pause();
+        v.classList.remove('is-autoplaying');
       }
     });
   }
 
-  function play(video, options = {}) {
+  function playPreview(video, audible = false) {
     if (!video) return;
-    const audible = options.audible === true || userActivatedAudio;
-
-    pauseOthers(video);
+    enableNativeAutoplay(video);
+    stopOthers(video);
     activeVideo = video;
     video.classList.add('is-autoplaying');
 
-    if (audible) {
+    const wantsAudio = audible || userGesture;
+    if (wantsAudio) {
       video.muted = false;
       video.defaultMuted = false;
       video.removeAttribute('muted');
       video.volume = 1;
     } else {
-      // Required for autoplay in browsers that block autoplay with sound.
       video.muted = true;
       video.defaultMuted = true;
       video.setAttribute('muted', '');
     }
 
-    const promise = video.play();
-    if (promise && typeof promise.catch === 'function') {
-      promise.catch(() => {
-        // Retry silently if the browser blocks audible autoplay.
-        if (!video.muted) {
-          video.muted = true;
-          video.defaultMuted = true;
-          video.setAttribute('muted', '');
-          const retry = video.play();
-          if (retry && typeof retry.catch === 'function') retry.catch(() => {});
-        }
+    const p = video.play();
+    if (p && p.catch) {
+      p.catch(() => {
+        // Browser rejected the audible request: force the standards-compliant
+        // silent autoplay path rather than leaving the preview stopped.
+        video.muted = true;
+        video.defaultMuted = true;
+        video.setAttribute('muted', '');
+        const retry = video.play();
+        if (retry && retry.catch) retry.catch(() => {});
       });
     }
   }
 
-  function activateAudio(video) {
-    userActivatedAudio = true;
-    play(video, { audible: true });
-  }
-
-  function areaVisibility(video) {
+  function visibility(video) {
     const r = video.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return 0;
-    const visibleW = Math.max(0, Math.min(r.right, window.innerWidth) - Math.max(r.left, 0));
-    const visibleH = Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0));
-    return (visibleW * visibleH) / (r.width * r.height);
+    const vw = Math.max(0, Math.min(r.right, innerWidth) - Math.max(r.left, 0));
+    const vh = Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0));
+    return (vw * vh) / (r.width * r.height);
   }
 
-  function choose65() {
+  function selectPreview() {
+    if (document.hidden || hoverVideo) return;
     let best = null;
-    let bestRatio = 0;
+    let bestVisibility = 0;
 
     videos.forEach((video) => {
       if (getComputedStyle(video).display === 'none') return;
-      const ratio = areaVisibility(video);
-      if (ratio > bestRatio) {
-        bestRatio = ratio;
+      const ratio = visibility(video);
+      if (ratio > bestVisibility) {
+        bestVisibility = ratio;
         best = video;
       }
     });
 
-    if (!best) return;
-
-    if (bestRatio >= 0.65) {
-      if (activeVideo !== best || best.paused) play(best);
-      return;
-    }
-
-    // Do not wait for an exact 65% crossing when a scroll leaves the viewport
-    // between two cards. Keep the dominant card playing from 35% upward.
-    if (bestRatio >= 0.35) {
-      if (activeVideo !== best || best.paused) play(best);
+    // Requested behavior: use the preview that is approximately 65% visible.
+    // If several are visible, the most visible one wins. 35% is a safety floor
+    // so playback does not stop in the small gap between cards.
+    if (best && bestVisibility >= 0.65) {
+      if (activeVideo !== best || best.paused) playPreview(best);
+    } else if (best && bestVisibility >= 0.35) {
+      if (activeVideo !== best || best.paused) playPreview(best);
     } else if (activeVideo) {
       activeVideo.pause();
       activeVideo.classList.remove('is-autoplaying');
@@ -104,79 +105,91 @@
     }
   }
 
-  videos.forEach((video) => {
-    prep(video);
-
-    if (finePointer()) {
-      video.addEventListener('mouseenter', () => play(video));
-      video.addEventListener('mouseleave', () => {
-        if (activeVideo === video) {
-          video.pause();
-          video.classList.remove('is-autoplaying');
-          activeVideo = null;
-        }
-      });
-    }
-
-    // A user tap/click is allowed to unlock audio.
-    video.addEventListener('pointerdown', () => {
-      userActivatedAudio = true;
-    }, { passive: true });
-
-    video.addEventListener('click', () => activateAudio(video));
-    video.addEventListener('play', () => {
-      activeVideo = video;
-      pauseOthers(video);
-    });
-  });
-
-  let scanQueued = false;
-  function queueScan() {
-    if (scanQueued) return;
-    scanQueued = true;
-    requestAnimationFrame(() => {
-      scanQueued = false;
-      choose65();
+  function queueSelect() {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      selectPreview();
     });
   }
 
-  window.addEventListener('scroll', queueScan, { passive: true });
-  window.addEventListener('resize', queueScan, { passive: true });
-  window.addEventListener('orientationchange', () => setTimeout(queueScan, 100), { passive: true });
+  videos.forEach((video) => {
+    // Retry as soon as each video has enough media buffered to start.
+    ['loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough'].forEach((event) => {
+      video.addEventListener(event, () => {
+        if (!document.hidden && !hoverVideo && visibility(video) >= 0.65) {
+          playPreview(video);
+        }
+      });
+    });
+
+    // Desktop: hover starts playback immediately.
+    video.addEventListener('mouseenter', () => {
+      hoverVideo = video;
+      playPreview(video);
+    });
+
+    video.addEventListener('mouseleave', () => {
+      if (hoverVideo === video) hoverVideo = null;
+      if (!hoverVideo) queueSelect();
+    });
+
+    // Direct touch/click is a genuine user gesture and can unlock audio.
+    video.addEventListener('pointerdown', () => {
+      userGesture = true;
+    }, { passive: true });
+
+    video.addEventListener('click', () => {
+      userGesture = true;
+      playPreview(video, true);
+    });
+  });
+
+  // Scroll + resize: continuously choose the dominant preview by actual area.
+  window.addEventListener('scroll', queueSelect, { passive: true });
+  window.addEventListener('resize', queueSelect, { passive: true });
+  window.addEventListener('orientationchange', () => setTimeout(queueSelect, 100), { passive: true });
 
   if ('IntersectionObserver' in window) {
-    const observer = new IntersectionObserver(queueScan, {
+    const observer = new IntersectionObserver(() => queueSelect(), {
       threshold: [0, 0.25, 0.35, 0.5, 0.65, 0.8, 1],
       rootMargin: '0px'
     });
     videos.forEach((video) => observer.observe(video));
   }
 
-  // Start the dominant preview after layout/media initialization.
-  window.addEventListener('load', () => {
-    choose65();
-    setTimeout(choose65, 250);
-    setTimeout(choose65, 900);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      activeVideo = null;
+      setTimeout(queueSelect, 80);
+    }
   });
-  setTimeout(choose65, 100);
+  window.addEventListener('pageshow', () => setTimeout(queueSelect, 100));
+  window.addEventListener('load', () => {
+    // Give CSS/layout and video sources time to settle before the first decision.
+    setTimeout(queueSelect, 50);
+    setTimeout(queueSelect, 300);
+    setTimeout(queueSelect, 1000);
+  });
 
   if (watch) {
     watch.addEventListener('click', () => {
-      userActivatedAudio = true;
-      if (previewSection) previewSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setTimeout(() => {
-        const first = document.querySelector('video[data-preview="01"]');
-        if (first) activateAudio(first);
-      }, 650);
+      userGesture = true;
+      const section = document.getElementById('previews');
+      const first = document.querySelector('video[data-preview="01"]');
+      if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setTimeout(() => playPreview(first, true), 600);
     });
   }
 
+  // Keep preview 04 mapped to preview 08 as in the existing page.
   const preview04 = document.querySelector('video[data-preview="04"] source');
   if (preview04) {
     preview04.src = 'https://raw.githubusercontent.com/thearchofdawn/700-anime-edits-reels-bundle/main/preview/preview-08.mp4.mp4';
     preview04.parentElement.load();
   }
 
+  // Countdown remains independent from video autoplay.
   const countdown = document.getElementById('countdown');
   if (countdown) {
     const deadline = new Date('2026-09-08T18:00:00+05:30').getTime();
