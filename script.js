@@ -2,14 +2,13 @@
   'use strict';
 
   const videos = Array.from(document.querySelectorAll('video[data-preview]'));
+  const previewVideos = videos.filter(v => v.dataset.preview !== 'hero');
   const watch = document.getElementById('watch-previews');
   let activeVideo = null;
   let hoverVideo = null;
   let raf = 0;
   let soundUnlocked = false;
 
-  // Browser-safe autoplay: silent autoplay is allowed much more broadly.
-  // Audio is enabled after a real user interaction (tap/click/keyboard).
   function prepare(video) {
     if (!video) return;
     video.autoplay = true;
@@ -27,7 +26,7 @@
   videos.forEach(prepare);
 
   function pauseAll(except) {
-    videos.forEach((v) => {
+    videos.forEach(v => {
       if (v !== except) {
         v.pause();
         v.classList.remove('is-autoplaying');
@@ -35,32 +34,27 @@
     });
   }
 
-  function start(video, allowSound = false) {
+  function start(video, audible = false) {
     if (!video) return;
     prepare(video);
     pauseAll(video);
     activeVideo = video;
     video.classList.add('is-autoplaying');
 
-    const audible = allowSound || soundUnlocked;
-    video.muted = !audible;
-    video.defaultMuted = !audible;
-    if (audible) {
-      video.removeAttribute('muted');
-      video.volume = 1;
-    } else {
-      video.setAttribute('muted', '');
-    }
+    const wantsAudio = audible || soundUnlocked;
+    video.muted = !wantsAudio;
+    video.defaultMuted = !wantsAudio;
+    video.volume = 1;
+    if (wantsAudio) video.removeAttribute('muted');
+    else video.setAttribute('muted', '');
 
-    const attempt = video.play();
-    if (attempt && typeof attempt.catch === 'function') {
-      attempt.catch(() => {
-        // Guaranteed fallback path: restart muted when the browser blocks audio.
+    const p = video.play();
+    if (p && p.catch) {
+      p.catch(() => {
         video.muted = true;
         video.defaultMuted = true;
         video.setAttribute('muted', '');
-        const retry = video.play();
-        if (retry && typeof retry.catch === 'function') retry.catch(() => {});
+        video.play()?.catch?.(() => {});
       });
     }
   }
@@ -77,14 +71,12 @@
     return (w * h) / (r.width * r.height);
   }
 
-  // Play the one preview with the largest visible area once it reaches ~65%.
   function chooseVisible() {
     if (document.hidden || hoverVideo) return;
-
     let best = null;
     let bestRatio = 0;
 
-    videos.forEach((video) => {
+    previewVideos.forEach(video => {
       if (getComputedStyle(video).display === 'none') return;
       const ratio = visibleRatio(video);
       if (ratio > bestRatio) {
@@ -98,7 +90,6 @@
       return;
     }
 
-    // Stop playback when no preview is near the requested visibility threshold.
     if (activeVideo) {
       activeVideo.pause();
       activeVideo.classList.remove('is-autoplaying');
@@ -114,8 +105,8 @@
     });
   }
 
-  videos.forEach((video) => {
-    ['loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough'].forEach((event) => {
+  previewVideos.forEach(video => {
+    ['loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough'].forEach(event => {
       video.addEventListener(event, () => {
         if (!document.hidden && !hoverVideo && visibleRatio(video) >= 0.65 && (activeVideo !== video || video.paused)) {
           start(video);
@@ -123,7 +114,6 @@
       });
     });
 
-    // Desktop hover behavior.
     video.addEventListener('mouseenter', () => {
       hoverVideo = video;
       start(video, soundUnlocked);
@@ -134,32 +124,20 @@
       queueChoose();
     });
 
-    // Touch/click unlocks sound for subsequent previews.
-    video.addEventListener('pointerdown', () => {
-      soundUnlocked = true;
-    }, { passive: true });
-
     video.addEventListener('click', () => {
       soundUnlocked = true;
       start(video, true);
     });
   });
 
-  // Any user gesture on the page unlocks audio for subsequent autoplay previews.
   const unlockAudio = () => {
     soundUnlocked = true;
-    if (activeVideo) {
-      activeVideo.muted = false;
-      activeVideo.defaultMuted = false;
-      activeVideo.removeAttribute('muted');
-      activeVideo.volume = 1;
-      const p = activeVideo.play();
-      if (p && p.catch) p.catch(() => {});
-    }
+    if (activeVideo) start(activeVideo, true);
   };
-  ['pointerdown', 'touchstart', 'keydown'].forEach((event) => {
-    document.addEventListener(event, unlockAudio, { once: true, passive: event !== 'keydown' });
-  });
+
+  document.addEventListener('pointerdown', unlockAudio, { once: true, passive: true });
+  document.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
+  document.addEventListener('keydown', unlockAudio, { once: true });
 
   window.addEventListener('scroll', queueChoose, { passive: true });
   window.addEventListener('resize', queueChoose, { passive: true });
@@ -167,10 +145,9 @@
 
   if ('IntersectionObserver' in window) {
     const observer = new IntersectionObserver(() => queueChoose(), {
-      threshold: [0, 0.25, 0.5, 0.65, 0.8, 1],
-      rootMargin: '0px'
+      threshold: [0, 0.25, 0.5, 0.65, 0.8, 1]
     });
-    videos.forEach((video) => observer.observe(video));
+    previewVideos.forEach(video => observer.observe(video));
   }
 
   document.addEventListener('visibilitychange', () => {
@@ -182,11 +159,7 @@
 
   window.addEventListener('pageshow', () => setTimeout(queueChoose, 100));
   window.addEventListener('load', () => {
-    // Try repeatedly because remote GitHub media can finish loading after layout.
-    setTimeout(queueChoose, 100);
-    setTimeout(queueChoose, 500);
-    setTimeout(queueChoose, 1500);
-    setTimeout(queueChoose, 3000);
+    [100, 500, 1500, 3000].forEach(ms => setTimeout(queueChoose, ms));
   });
 
   if (watch) {
@@ -200,19 +173,19 @@
     });
   }
 
-  // Ensure preview 01 and 04 point at known-good raw files.
+  // Preview 01 MUST remain the original Preview 04 asset.
   const source01 = document.querySelector('video[data-preview="01"] source');
   if (source01) {
-    source01.src = 'https://raw.githubusercontent.com/thearchofdawn/700-anime-edits-reels-bundle/main/preview/preview-01.mp4.mp4';
+    source01.src = 'https://raw.githubusercontent.com/thearchofdawn/700-anime-edits-reels-bundle/main/preview/preview-04.mp4.mp4';
     source01.parentElement.load();
   }
+
   const source04 = document.querySelector('video[data-preview="04"] source');
   if (source04) {
     source04.src = 'https://raw.githubusercontent.com/thearchofdawn/700-anime-edits-reels-bundle/main/preview/preview-08.mp4.mp4';
     source04.parentElement.load();
   }
 
-  // Countdown.
   const countdown = document.getElementById('countdown');
   if (countdown) {
     const deadline = new Date('2026-09-08T18:00:00+05:30').getTime();
@@ -232,9 +205,7 @@
     setInterval(tick, 1000);
   }
 
-  document.querySelectorAll('.buy').forEach((a) => {
-    a.addEventListener('click', () => {
-      try { fbq('track', 'InitiateCheckout'); } catch (_) {}
-    });
-  });
+  document.querySelectorAll('.buy').forEach(a => a.addEventListener('click', () => {
+    try { fbq('track', 'InitiateCheckout'); } catch (_) {}
+  }));
 })();
