@@ -186,20 +186,26 @@
     source04.parentElement.load();
   }
 
-  const countdown = document.getElementById('countdown');
-  if (countdown) {
+  const countdownTargets = [
+    document.getElementById('countdown'),
+    document.getElementById('finalCountdown'),
+    document.getElementById('stickyCountdown')
+  ].filter(Boolean);
+
+  if (countdownTargets.length) {
     const deadline = new Date('2026-09-08T19:30:00+05:30').getTime();
     const tick = () => {
       const diff = deadline - Date.now();
       if (diff <= 0) {
-        countdown.textContent = 'PRICE NOW ₹299';
+        countdownTargets.forEach(el => { el.textContent = 'PRICE NOW ₹299'; });
         return;
       }
       const d = Math.floor(diff / 86400000);
       const h = Math.floor((diff % 86400000) / 3600000);
       const m = Math.floor((diff % 3600000) / 60000);
       const s = Math.floor((diff % 60000) / 1000);
-      countdown.textContent = `${d}d ${String(h).padStart(2, '0')}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s LEFT`;
+      const text = `${d}d ${String(h).padStart(2, '0')}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s LEFT`;
+      countdownTargets.forEach(el => { el.textContent = text; });
     };
     tick();
     setInterval(tick, 1000);
